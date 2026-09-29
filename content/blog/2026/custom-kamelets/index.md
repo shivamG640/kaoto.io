@@ -17,7 +17,7 @@ aliases:
 
 **What you'll learn**
 
-- Why the Content Filter pattern belongs in a reusable Kamelet, not copy-pasted route steps
+- Why the **Content Filter** pattern belongs in a reusable Kamelet, not copy-pasted route steps
 - How a multi-route Camel file makes the sensitive data leak obvious before you fix it
 - How to **build** a custom action Kamelet in Kaoto with an **`allowlist`** property
 - How each route configures its own allowlist in the step form — without duplicating filter logic
@@ -51,10 +51,9 @@ The build goes in three steps:
 
 ## Step 1: Four routes, one file (no filter yet)
 
-Create `orders.camel.yaml` (or any `*.camel.yaml` file Kaoto recognises). Paste the YAML below as-is. Notice that **analytics and partner-export do not call a Kamelet yet** — they log the full body, including PII.
+Create `orders.camel.yaml` (or any `*.camel.yaml` file Kaoto recognises). Paste the YAML below as-is from the **View YAML** tab. Notice on the **Image Preview** tab that **analytics and partner-export do not call a Kamelet yet** — they log the full body, including PII.
 
-```yaml
-# Shared sample order (PII included on purpose)
+{{< img-toggle src="./canvas-with-no-content-filter-nodes.png" lang="yaml" >}}
 - route:
     id: order-ingest
     description: Produce a sample order and fan out to fulfillment, analytics, and partner export
@@ -121,44 +120,37 @@ Create `orders.camel.yaml` (or any `*.camel.yaml` file Kaoto recognises). Paste 
         - log:
             loggingLevel: INFO
             message: "PARTNER-EXPORT (unfiltered — problem): ${body}"
-```
-
-{{< figure src="canvas-with-no-content-filter-nodes.png" alt="Canvas with no content filter nodes yet" caption="Canvas with ingest → fulfillment / analytics / partner-export; no Content Filter nodes yet" class="image" >}}
+{{< /img-toggle >}}
 
 ### What you should see when it runs (before the fix)
 
-**Fulfillment** correctly has identity fields:
-
-```text
+**Fulfillment** correctly has identity fields, **Analytics** and **partner-export** incorrectly have the same full payload:
+{{< img-toggle src="./terminal-output-with-no-content-filter-nodes.png" lang="text" >}}
 FULFILLMENT (full payload): {"order_id":"ORD-1001","customer_name":"Ada Lovelace","customer_email":"ada@example.com", ...}
-```
 
-**Analytics** and **partner-export** incorrectly have the same full payload:
-
-```text
 ANALYTICS (unfiltered — problem): {"order_id":"ORD-1001","customer_name":"Ada Lovelace","customer_email":"ada@example.com", ...}
+
 PARTNER-EXPORT (unfiltered — problem): {"order_id":"ORD-1001","customer_name":"Ada Lovelace","customer_email":"ada@example.com", ...}
-```
+{{< /img-toggle >}}
 
-That's the teachable moment: two different consumers (metrics vs partner API), **one shared mistake** — no Content Filter yet.
+That's the teachable moment: two different consumers (metrics vs partner API), **one shared mistake** — no **Content Filter** yet.
 
-{{< figure src="terminal-output-with-no-content-filter-nodes.png" alt="Terminal output with no content filter nodes yet" caption="Terminal output showing all fields — no Content Filter nodes connected yet" class="image" >}}
 
 ## Step 2: Build the custom Content Filter Kamelet in Kaoto
 
-You're **not** going to paste a hard-coded allowlist into every route, and you're **not** going to clone `setBody` JSON on each route either. Instead, you'll create the Kamelet once in Kaoto (New → Kamelet, or your editor's create-Kamelet flow):
+You're **not** going to paste a hard-coded allowlist into every route, and you're **not** going to clone `setBody` JSON on each route either. Instead, you'll create the Kamelet once in Kaoto:
 
-1. Set the name to `content-filter-action` and the type to **action** — not source (which produces messages) or sink (which consumes them), but action.
+1. Create a new Kamelet by clicking on New File in Kaoto view(perspective) integrations nav bar, set the name to `content-filter-action` and the type to **action** — not source (which produces messages) or sink (which consumes them), but action, because this Kamelet sits between existing steps in a route and transforms the message in place.
 2. Add a single property: **`allowlist`** (string) — one control that each route will configure independently.
 3. Give it a sensible default: the company baseline of safe shipping fields (no customer identity).
-4. On the Kamelet canvas, wire `kamelet:source` → unmarshal JSON → `setBody` to keep only the fields named in `{{allowlist}}` → marshal JSON.
+4. On the Kamelet canvas, wire `kamelet:source` → `unmarshal` JSON → `setBody` to keep only the fields named in `{{allowlist}}` → `marshal` JSON.
 5. **Save** the Kamelet into the workspace (for example `content-filter-action.kamelet.yaml`). No IDE restart needed.
 
 ### Reference YAML
 
-Use this as a check against **Source Code** view after building in Kaoto — or paste it directly if you're skipping the visual designer:
+Use this as a check against **Source Code** view after building in Kaoto — or paste the code from the **YAML Source** directly if you're skipping the visual designer:
 
-```yaml
+{{< img-toggle src="./canvas-with-content-filter-kamelet.png" lang="txt" >}}
 metadata:
   name: content-filter-action
   labels:
@@ -209,11 +201,10 @@ spec:
           quantity, amount, destination_country, shipping_priority,
           status). Do not include customer_* or address fields.
         default: order_id,item_sku,quantity,amount,destination_country,shipping_priority,status
-```
+{{< /img-toggle >}}
 
 Save if you edited source. Workspace Kamelets are picked up automatically when Kaoto refreshes the catalog tiles.
 
-{{< figure src="canvas-with-content-filter-kamelet.png" alt="Canvas with content filter kamelet" caption="Canvas showing the Content Filter Kamelet and its configured properties in the form's Modified tab" class="image" >}}
 
 ### Alternative: one boolean property per field
 
@@ -290,15 +281,15 @@ Same tile, two `allowlist` values. Fulfillment still has no filter.
 
 ### What you should see after the fix
 
-```text
+{{< img-toggle src="./terminal-output-with-content-filter-nodes.png" lang="text" >}}
 FULFILLMENT (full payload): {"order_id":"ORD-1001","customer_name":"Ada Lovelace","customer_email":"ada@example.com", ...}
+
 ANALYTICS (filtered): {"order_id":"ORD-1001","item_sku":"SKU-ABC-42","quantity":2,"amount":149.99,"destination_country":"US","shipping_priority":"NEXT_DAY","status":"NEW"}
+
 PARTNER-EXPORT (filtered): {"order_id":"ORD-1001","item_sku":"SKU-ABC-42","quantity":2,"destination_country":"US","status":"NEW"}
-```
+{{< /img-toggle >}}
 
-{{< figure src="terminal-output-with-content-filter-nodes.png" alt="Terminal output with content filter nodes" caption="Terminal output after adding Content Filter nodes — PII is gone from analytics and partner-export" class="image" >}}
-
-Partner-export has no `amount` or `shipping_priority` — configured on that step only, without touching the analytics route.
+Partner-export has no `amount` or `shipping_priority` — configured on that step only. The analytics route uses the same Kamelet but with a different allowlist configured.
 
 ### Two ways to change policy
 
